@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""Detecta PRs duplicadas en cualquier repositorio de GitHub.
+"""Find overlapping (possibly duplicate) PRs in any GitHub repository.
 
-Los repos grandes acumulan trabajo duplicado que nadie detecta: varias personas
-resuelven el mismo bug en paralelo porque no ven lo que otras ya están haciendo.
-Este script compara los diffs de las PRs abiertas y señala pares con solape
-alto, para que un humano decida si merece la pena avisar.
+Large repos accumulate duplicate work nobody notices: several people solve the
+same bug in parallel because they can't see what the others are doing. This
+script compares the diffs of open PRs and flags pairs with high overlap, so a
+human can decide whether it's worth acting on.
 
-No juzga redundancia — solo mide similitud. La decisión es humana.
-el mismo bug de systemd con código distinto y cada título parecía único.
+It does not judge redundancy — it only measures similarity. The decision is
+human: several PRs can fix the same bug with different code and titles that
+look unrelated.
 
-Detecta el CONCEPTO, no el texto. Medido sobre el caso real #124076 (5 PRs):
+Detection works on the CONCEPT, not the text. Measured on a real case (5 PRs
+of one bug):
 
-    Jaccard sobre líneas añadidas ....... 0.03 – 0.09   <- inútil
-    Jaccard sobre identificadores ....... 0.23 – 0.35   <- mismo bug
-                                    control ........... 0.07   <- bug distinto
+    Jaccard over added lines ....... 0.03 – 0.09   <- useless
+    Jaccard over identifiers ....... 0.23 – 0.35   <- same bug
+                            control .. 0.07        <- different bug
 
-Umbral 0.18. El control negativo queda 4x por debajo y el par más cercano entre
-duplicados reales (0.23) sigue por encima.
+Threshold 0.18. The negative control sits 4x below it, and the closest pair
+among real duplicates (0.23) stays above it.
 
-    python3 find_dupes.py                        # top 10 grupos
+    python3 find_dupes.py                        # top groups
     python3 find_dupes.py --limit 200 --workers 8
-    python3 find_dupes.py --notify --dry-run     # comentaría; dry-run no publica
+    python3 find_dupes.py --comment --dry-run    # would comment; dry-run posts nothing
 """
 from __future__ import annotations
 
@@ -36,6 +38,8 @@ import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
+
+__version__ = "0.2.0"
 
 REPO = os.environ.get("DUPE_REPO", "django/django")
 # `HOME` se respeta: el script corre en la máquina de quien lo usa, no en otra.
@@ -112,14 +116,14 @@ def gh_json_checked(args, timeout=90, contexto=""):
         p = subprocess.run(["gh", *args], capture_output=True, text=True,
                            env=ENV, timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"timeout de {timeout}s{' en ' + contexto if contexto else ''}")
+        raise RuntimeError(f"timeout after {timeout}s{' in ' + contexto if contexto else ''}")
     if p.returncode != 0:
         raise RuntimeError(
-            f"gh {' '.join(args[:3])} falló ({p.returncode}): {p.stderr.strip()[:160]}")
+            f"gh {' '.join(args[:3])} failed ({p.returncode}): {p.stderr.strip()[:160]}")
     try:
         return json.loads(p.stdout)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"respuesta no-JSON de gh: {e}")
+        raise RuntimeError(f"non-JSON response from gh: {e}")
 
 
 def fetch_open_prs(repo: str, limit: int) -> list[dict]:
@@ -135,7 +139,7 @@ def fetch_open_prs(repo: str, limit: int) -> list[dict]:
             # antes: se concatenaba la salida vacía y el script reportaba "0 duplicados"
             # con exit 0. Un repo mal escrito tiene que ser un error, no un "todo bien".
             raise RuntimeError(
-                f"no se pudieron listar PRs de '{repo}' (gh rc={r.returncode}): "
+                f"could not list open PRs of '{repo}' (gh rc={r.returncode}): "
                 f"{r.stderr.strip()[:200]}")
         raw += r.stdout
     dec, i, out = json.JSONDecoder(), 0, []
@@ -258,7 +262,7 @@ def fetch_many(numbers: list[int], repo: str, workers: int, cache_on: bool) -> d
         out.update({n: v for n, v in stale.items() if n in set(numbers)})
 
     if todo:
-        print(f"  descargando {len(todo)} diffs con {workers} workers...", file=sys.stderr)
+        print(f"  downloading {len(todo)} diffs with {workers} workers...", file=sys.stderr)
         done = 0
         with cf.ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {ex.submit(load_pr, n, repo): n for n in todo}
@@ -277,7 +281,7 @@ def fetch_many(numbers: list[int], repo: str, workers: int, cache_on: bool) -> d
             except Exception as e:
                 # sin `pass`: una caché que nunca se escribe hace que cada pasada
                 # re-descargue 33k diffs, que es justo lo que la caché evita.
-                print(f"  aviso: no se pudo escribir la caché en {CACHE}: {e}",
+                print(f"  warning: could not write cache to {CACHE}: {e}",
                       file=sys.stderr)
     return out
 
@@ -460,7 +464,7 @@ def cluster(prs: dict[int, dict], threshold: float) -> tuple[list[list[dict]], s
     for g in out:
         g.sort(key=lambda p: p["created"] or "")
     out.sort(key=lambda g: (-len(g), g[0]["created"] or ""))
-    print(f"  {pairs} pares comparados -> {len(out)} grupos, {len(conflicts)} en conflicto",
+    print(f"  {pairs} pairs compared -> {len(out)} groups, {len(conflicts)} in conflict",
           file=sys.stderr)
     return out, conflicts
 
@@ -521,20 +525,32 @@ def report(group: list[dict], conflicts: set[tuple[int, int]] | None = None) -> 
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Detecta PRs duplicadas en un repo de GitHub")
-    ap.add_argument("--repo", default=REPO)
-    ap.add_argument("--limit", type=int, default=120, help="PRs a analizar (más = más lento)")
-    ap.add_argument("--threshold", type=float, default=THRESHOLD)
-    ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--notify", action="store_true", help="comentar en la PR más antigua de cada grupo")
-    ap.add_argument("--dry-run", action="store_true", help="con --notify, muestra pero no publica")
-    ap.add_argument("--out", metavar="PATH")
+    ap = argparse.ArgumentParser(
+        description="Find overlapping (possibly duplicate) PRs in a GitHub repository")
+    ap.add_argument("--repo", default=REPO, help="repository as owner/name")
+    ap.add_argument("--limit", type=int, default=120,
+                    help="how many of the most recent open PRs to analyze (more = slower)")
+    ap.add_argument("--threshold", type=float, default=THRESHOLD,
+                    help="minimum identifier similarity (0-1) to flag a pair")
+    ap.add_argument("--workers", type=int, default=6, help="parallel diff downloads")
+    # --comment is the canonical publish flag; --notify stays as an alias so old
+    # invocations keep working. The guardrail lives in the README: run dry-run
+    # first, and never unattended.
+    ap.add_argument("--comment", "--notify", dest="comment", action="store_true",
+                    help="post a comment on the oldest PR of each group "
+                         "(human review required - never run unattended)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with --comment, print the comments instead of posting them")
+    ap.add_argument("--out", metavar="PATH",
+                    help="write the detected group numbers as JSON to PATH")
     ap.add_argument("--cache", metavar="PATH",
-                    help="ruta del caché de diffs (default: $XDG_CACHE_HOME/find_dupes/prs.json)")
+                    help="diff cache path (default: $XDG_CACHE_HOME/find_dupes/prs.json)")
     ap.add_argument("--code-ext", metavar="LIST",
-                    help="extensiones que cuentan como código, separadas por comas "
+                    help="comma-separated extensions counted as code "
                          "(default: " + ",".join(CODE_EXTS) + ")")
-    ap.add_argument("--no-cache", action="store_true", help="no leer ni escribir caché")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="ignore the cache: neither read it nor write it")
+    ap.add_argument("--version", action="version", version=f"find_dupes {__version__}")
     a = ap.parse_args(argv)
 
     # `global` es obligatorio: sin esto Python crea un CACHE local y la
@@ -548,18 +564,18 @@ def main(argv=None) -> int:
             re.escape(e.strip().lstrip("."))          # sin escape, `c++` repetía `c+`
             for e in a.code_ext.split(",") if e.strip()) + r")$")
 
-    print(f"Buscando PRs abiertas en {a.repo} (limit={a.limit})...", file=sys.stderr)
+    print(f"Fetching open PRs from {a.repo} (limit={a.limit})...", file=sys.stderr)
     listing = fetch_open_prs(a.repo, a.limit)
     nums = [i["number"] for i in listing]
-    print(f"  {len(nums)} PRs. Diffing...", file=sys.stderr)
+    print(f"  {len(nums)} PRs found. Fetching diffs...", file=sys.stderr)
     prs = fetch_many(nums, a.repo, a.workers, cache_on=not a.no_cache)
     prs = {n: p for n, p in prs.items() if p}
 
     groups, conflicts = cluster(prs, a.threshold)
     wasted = sum(len(g) - 1 for g in groups)
 
-    print(f"\n{'='*72}\nfind_dupes — {len(groups)} grupos, {wasted} PRs potencialmente redundantes "
-          f"de {len(prs)} analizadas\n{'='*72}")
+    print(f"\n{'='*72}\nfind_dupes {__version__} — {len(groups)} groups, {wasted} PRs "
+          f"potentially redundant of {len(prs)} analyzed\n{'='*72}")
     for g in groups[:12]:
         g = sorted(g, key=lambda p: p["created"] or "")
         print(f"\n  {len(g)} PRs:")
@@ -570,8 +586,9 @@ def main(argv=None) -> int:
         Path(a.out).write_text(json.dumps(
             [[p["n"] for p in sorted(g, key=lambda x: x["created"] or "")] for g in groups], indent=1))
 
-    if a.notify and groups:
-        print(f"\n  {'SIMULANDO' if a.dry_run else 'COMENTANDO'} en {len(groups)} grupos...", file=sys.stderr)
+    if a.comment and groups:
+        print(f"\n  {'DRY-RUN (not posting)' if a.dry_run else 'COMMENTING'} on "
+              f"{len(groups)} groups...", file=sys.stderr)
         for g in groups:
             g = sorted(g, key=lambda p: p["created"] or "")
             target = g[0]  # la más antigua: la que lleva más tiempo esperando

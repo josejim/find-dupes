@@ -23,6 +23,6 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest test_find_dupes.py test_regressions.py -v
+          python -m pytest test_find_dupes.py test_regressions.py test_v02.py -v
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
