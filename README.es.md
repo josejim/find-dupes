@@ -101,20 +101,28 @@ Corrido sobre la cola de PRs abiertas de [SmartTube](https://github.com/yuliskov
 un cliente de media para Android TV con mucho movimiento:
 
 ```
-50 PRs abiertas analizadas  ->  5 grupos de solape, 11 PRs  (~22 % de la cola)
+50 PRs abiertas analizadas  ->  5 grupos de solape, 11 PRs marcadas para revisión
+                                (revisión de diffs: 1 par duplicado real)
 ```
 
-Qué encontraron los grupos:
+Qué encontraron los grupos, *después de leer los diffs*:
 
-- dos implementaciones de voice-over (#5817, #6265)
-- dos reescrituras de subtítulos (#5839, #6272)
-- tres tomas del mismo playback de playlists (#5790, #5791, #6162)
+- **un par realmente competitivo** — dos implementaciones de voice-over
+  (#5817, #6265) que añaden *las mismas rutas de archivos nuevos*: solo una puede
+  llegar a mergear
+- **un par complementario** — dos reescrituras de subtítulos (#5839, #6272) que se
+  apilan como features pero tocan los mismos archivos, así que importa el orden
+- **tres grupos que no son duplicados** — tres features de playlists
+  (#5790, #5791, #6162) y dos features de settings sin relación (#5437, #5495) que
+  solo colisionan en archivos de UI compartidos y en el churn de `strings.xml` de
+  46 locales; el score de similitud está dominado por ese churn
 - dos arreglos paralelos de errores del player (#6122, #6188) — un tercero (#6295)
   fue aplicado a mano por el mantenedor después
 
-8 de las 11 PRs están marcadas `CONFLICTING` en GitHub: los conflictos de merge
-mutuos son el síntoma visible. Los solapes no se ven en la lista de PRs — de eso
-se trata.
+Así que: 2 de 50 PRs (~4 %) eran trabajo realmente duplicado; 8 de las 11 PRs
+agrupadas están marcadas `CONFLICTING` en GitHub — ese es el patrón *real*: features
+independientes chocando en los mismos archivos calientes, no gente resolviendo el
+mismo problema dos veces. Los clusters son una lista de vigilancia, nunca un veredicto.
 
 ## Tests
 

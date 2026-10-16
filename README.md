@@ -100,20 +100,27 @@ Run against the open PR queue of [SmartTube](https://github.com/yuliskov/SmartTu
 a busy Android TV media client:
 
 ```
-50 open PRs analyzed  ->  5 overlap groups, 11 PRs  (~22 % of the queue)
+50 open PRs analyzed  ->  5 overlap groups, 11 PRs flagged for review
+                         (diff review: 1 genuine duplicate pair)
 ```
 
-What the groups looked like:
+What the groups looked like, *after reading the diffs*:
 
-- two voice-over implementations (#5817, #6265)
-- two subtitle reworks (#5839, #6272)
-- three takes on playlist playback (#5790, #5791, #6162)
+- **one genuine competitive pair** — two voice-over implementations
+  (#5817, #6265) that add the *same new file paths*: only one can ever merge
+- **one complementary pair** — two subtitle reworks (#5839, #6272) that stack as
+  features but touch the same files, so merge order matters
+- **three groups that are not duplicates at all** — three playlist features
+  (#5790, #5791, #6162) and two unrelated settings features (#5437, #5495) that
+  merely collide on shared UI files and on 46-locale `strings.xml` churn; the
+  similarity score is dominated by that churn
 - two parallel player-error fixes (#6122, #6188) — a third (#6295) was later
   applied by the maintainer by hand
 
-8 of the 11 PRs are flagged `CONFLICTING` on GitHub: mutual merge conflicts are
-the visible symptom. The overlaps aren't obvious from the PR list — that's the
-point.
+So: 2 of 50 PRs (~4 %) were genuinely duplicate work; 8 of the 11 grouped PRs are
+flagged `CONFLICTING` on GitHub, which is the *real* pattern — independent features
+colliding on the same hot files, not people solving the same problem twice.
+Clusters are a watch-list, never a verdict.
 
 ## Tests
 
