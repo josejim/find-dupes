@@ -1,0 +1,22 @@
+name: Find Duplicate PRs
+
+on:
+  schedule:
+    - cron: '0 17 * * 1-5'  # Every weekday at 17:00 UTC
+  workflow_dispatch:
+
+jobs:
+  find-dupes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Run find-dupes
+        run: |
+          pip install requests
+          python3 find_dupes.py --repo ${{ github.repository }} --mode pr --limit 50
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

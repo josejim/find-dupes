@@ -39,7 +39,7 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0-dev"
 
 REPO = os.environ.get("DUPE_REPO", "django/django")
 # `HOME` se respeta: el script corre en la máquina de quien lo usa, no en otra.
@@ -550,6 +550,10 @@ def main(argv=None) -> int:
                          "(default: " + ",".join(CODE_EXTS) + ")")
     ap.add_argument("--no-cache", action="store_true",
                     help="ignore the cache: neither read it nor write it")
+    ap.add_argument("--mode", choices=["pr", "issues"], default="pr",
+                    help="scan mode: 'pr' (default) for pull requests, 'issues' for issues")
+    ap.add_argument("--exclude-locale", action="store_true",
+                    help="exclude locale files (strings.xml) from similarity calculation")
     ap.add_argument("--version", action="version", version=f"find_dupes {__version__}")
     a = ap.parse_args(argv)
 
